@@ -499,7 +499,7 @@ sub breakdownFac {
         # to how they are in the actual annotation. 
         # NC_007030.2 complement(4370..>4576)
         # is in the feature table as: <4576	4370	CDS
-        $ncbi_coords_A[$i] =~ s/^\</\!/;
+        $ncbi_coords_A[$i] =~ s/\</\!/;
         $ncbi_coords_A[$i] =~ s/\>/\</;
         $ncbi_coords_A[$i] =~ s/\!/\>/;
         $ncbi_coords .= "complement(" . $ncbi_coords_A[$i] . ")" 
@@ -520,7 +520,7 @@ sub breakdownFac {
       # to how they are in the actual annotation. 
       # NC_007030.2 complement(4370..>4576)
       # is in the feature table as: <4576	4370	CDS
-      $ncbi_coords =~ s/^\</\!/g;
+      $ncbi_coords =~ s/\</\!/g;
       $ncbi_coords =~ s/\>/\</g;
       $ncbi_coords =~ s/\!/\>/g;
       $ncbi_coords = "complement(" . $ncbi_coords . ")";
