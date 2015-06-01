@@ -493,8 +493,20 @@ sub breakdownFac {
     # e.g: join(161990..162784,complement(88222..88806),complement(86666..87448))
     for(my $i = 0; $i < $nsegments; $i++) { 
       if($i > 0) { $ncbi_coords .= ","; }
-      if($is_rev_A[$i]) { $ncbi_coords .= "complement(" . $ncbi_coords_A[$i] . ")" }
-      else              { $ncbi_coords .= $ncbi_coords_A[$i]; }
+      if($is_rev_A[$i]) { 
+        # first, deal with a non-obvious situation, where in the feature table
+        # '>' and '<' characters indicating incompleteness are inverted relative
+        # to how they are in the actual annotation. 
+        # NC_007030.2 complement(4370..>4576)
+        # is in the feature table as: <4576	4370	CDS
+        $ncbi_coords_A[$i] =~ s/^\</\!/;
+        $ncbi_coords_A[$i] =~ s/\>/\</;
+        $ncbi_coords_A[$i] =~ s/\!/\>/;
+        $ncbi_coords .= "complement(" . $ncbi_coords_A[$i] . ")" 
+      }
+      else { 
+        $ncbi_coords .= $ncbi_coords_A[$i]; 
+      }
     }
   }
   else { 
