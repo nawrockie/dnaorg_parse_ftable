@@ -509,26 +509,31 @@ sub breakdownFac {
       }
     }
   }
-  else { 
+  else { # normal case, all exons/segments are on the same strand
     for(my $i = 0; $i < $nsegments; $i++) { 
       if($i > 0) { $ncbi_coords .= ","; }
       $ncbi_coords .= $ncbi_coords_A[$i];
     }
-    if($nrev > 0) { # if we get here all segments are on reverse strand
-      # first, deal with a non-obvious situation, where in the feature table
-      # '>' and '<' characters indicating incompleteness are inverted relative
-      # to how they are in the actual annotation. 
-      # NC_007030.2 complement(4370..>4576)
-      # is in the feature table as: <4576	4370	CDS
-      $ncbi_coords =~ s/\</\!/g;
-      $ncbi_coords =~ s/\>/\</g;
-      $ncbi_coords =~ s/\!/\>/g;
-      $ncbi_coords = "complement(" . $ncbi_coords . ")";
-    }
   }
-  if($nsegments > 1) { 
+  if($nsegments > 1) { # more than one segment
     $ncbi_coords = "join(" . $ncbi_coords . ")";
   }
+  # now add complement for cases where are exons/segments are on reverse strand
+  # impt to do this after the join, so we get complement(join()) instead of
+  # join(complement())
+  if($nfwd == 0 && $nrev > 0) { # all segments are on reverse strand
+    # first, deal with a non-obvious situation, where in the feature table
+    # '>' and '<' characters indicating incompleteness are inverted relative
+    # to how they are in the actual annotation. 
+    # NC_007030.2 complement(4370..>4576)
+    # is in the feature table as: <4576	4370	CDS
+    $ncbi_coords =~ s/\</\!/g;
+    $ncbi_coords =~ s/\>/\</g;
+    $ncbi_coords =~ s/\!/\>/g;
+    # now add the 'complement()'
+    $ncbi_coords = "complement(" . $ncbi_coords . ")";
+  }
+
   # printf("in breakdownFac() input: $fac, returning $faccn $coords ncbi_coords:$ncbi_coords\n");
 
   # determine strand
