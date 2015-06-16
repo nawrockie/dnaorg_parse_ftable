@@ -538,10 +538,11 @@ sub breakdownFac {
 
   # determine strand
   my $ret_strand = undef;
-  if   ($nfwd == $nsegments) { $ret_strand = "+"; }
-  elsif($nrev == $nsegments) { $ret_strand = "-"; }
-  elsif($nunc == $nsegments) { $ret_strand = "?"; }
-  else                       { $ret_strand = "!"; }
+  if   ($nfwd == $nsegments)     { $ret_strand = "+"; }
+  elsif($nrev == $nsegments)     { $ret_strand = "-"; }
+  elsif($nunc  > 0)              { $ret_strand = "?"; }
+  elsif($nfwd  > 0 && $nrev > 0) { $ret_strand = "!"; }
+  else                           { die "ERROR in breakdownFac() unable to determine strand for fac: $fac\n"; }
 
   return($faccn, $ncbi_coords, $sort_coord, $ret_strand);
 }
