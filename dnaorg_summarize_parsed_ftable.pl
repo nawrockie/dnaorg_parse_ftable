@@ -25,7 +25,7 @@ use Getopt::Long;
 #gb|EU822321.1|	EU822321.1	278..1048	+	278	coat protein	1	gb|ACF42103.1|	-	-
 ##################################################
 #
-# This script will 'summarize' a parsed ftable by giving a report on the number of 
+# This script will 'summarize' 1 or more parsed ftables by giving a report on the number of 
 # non-empty rows for each column.
 #
 # For the above parsed ftable:
@@ -46,39 +46,51 @@ use Getopt::Long;
 ##
 # NOTE: you'd never see a '0' count in a real full parsed ftable output, but here I've truncated
 # one so their are qualifiers that have 0 counts.
-my $usage = "\ndnaorg_summarize_parsed_ftable.pl <.tbl file output from dnaorg_parse_ftable.pl>\n";
+my $usage = "\ndnaorg_summarize_parsed_ftable.pl <lines from >= 1 .tbl file output from dnaorg_parse_ftable.pl>\n";
 $usage .= "\n"; 
 
-my $line = <>;
-if($line !~ m/^\#/) { 
-  die "ERROR, first line does not start with #";
-}
-$line =~ s/^\#//;
-chomp $line;
-my @qualifiers_A = split(/\s+/, $line);
-my $nqualifiers = scalar(@qualifiers_A);
-my @ct_A = ();
+my %all_qualifiers_cts_H = ();
+my @all_qualifiers_A = ();
+my $all_nqualifiers = 0;
 my $w_qualifier = length("qualifier") + 1;
-for(my $i = 0; $i < $nqualifiers; $i++) { 
-  $ct_A[$i] = 0; 
-  if(length($qualifiers_A[$i]) > $w_qualifier) { $w_qualifier = length($qualifiers_A[$i]); }
-}
+
+my @cur_qualifiers_A = ();
+my $cur_nqualifiers = 0;
 
 my $nrows = 0;
-while($line = <>) { 
-  if($line !~ m/^\#/) { 
+while(my $line = <>) { 
+  if($line =~ m/^\#/) { 
+    $line =~ s/^\#//;
+    chomp $line;
+    @cur_qualifiers_A = split(/\s+/, $line);
+    $cur_nqualifiers = scalar(@cur_qualifiers_A);
+    for(my $i = 0; $i < $cur_nqualifiers; $i++) { 
+      my $qualifier = $cur_qualifiers_A[$i];
+      if(! exists $all_qualifiers_cts_H{$qualifier}) { 
+        $all_qualifiers_cts_H{$qualifier} = 0;
+        push(@all_qualifiers_A, $qualifier);
+        $all_nqualifiers++;
+        if(length($qualifier) > $w_qualifier) { $w_qualifier = length($qualifier); }
+      }
+    }
+  }
+  else { # line does not start with '#'
     chomp $line;
     my @values_A = split(/\t/, $line);
-    if(scalar(@values_A) != $nqualifiers) { die "ERROR, didn't find $nqualifiers tab-delimited tokens in line: $line\n"; }
-    for(my $i = 0; $i < $nqualifiers; $i++) { 
-      if($values_A[$i] ne "-") { $ct_A[$i]++; }
+    if(scalar(@values_A) != $cur_nqualifiers) { die "ERROR, didn't find $cur_nqualifiers tab-delimited tokens in line: $line\n"; }
+    for(my $i = 0; $i < $cur_nqualifiers; $i++) { 
+      my $qualifier = $cur_qualifiers_A[$i];
+      if($values_A[$i] ne "-") { 
+        $all_qualifiers_cts_H{$qualifier}++; 
+      }
     }
     $nrows++;
   }
 }
 
 printf("#%-*s  %5s  %5s\n", $w_qualifier-1, "qualifier", "count", "fract");
-for(my $i = 0; $i < $nqualifiers; $i++) { 
-  printf("%-*s  %5d  %5.3f\n", $w_qualifier, $qualifiers_A[$i], $ct_A[$i], ($ct_A[$i] / $nrows));
+for(my $i = 0; $i < $all_nqualifiers; $i++) { 
+  my $qualifier = $all_qualifiers_A[$i];
+  printf("%-*s  %5d  %5.3f\n", $w_qualifier, $qualifier, $all_qualifiers_cts_H{$qualifier}, $all_qualifiers_cts_H{$qualifier} / $nrows);
 }
   
