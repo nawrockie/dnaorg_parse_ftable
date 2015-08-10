@@ -510,9 +510,21 @@ sub breakdownFac {
     }
   }
   else { # normal case, all exons/segments are on the same strand
-    for(my $i = 0; $i < $nsegments; $i++) { 
-      if($i > 0) { $ncbi_coords .= ","; }
-      $ncbi_coords .= $ncbi_coords_A[$i];
+    # if we're on the reverse strand, we need to reverse the order of the 
+    # exons, because the order of reverse strand exons in a feature table is 
+    # opposite what it is in Entrez, and our other scripts use Entrez
+    # format, so we enforce that convention here.
+    if($nrev > 0) { 
+      for(my $i = $nsegments-1; $i >= 0; $i--) { 
+        if($i < ($nsegments-1)) { $ncbi_coords .= ","; }
+        $ncbi_coords .= $ncbi_coords_A[$i];
+      }
+    }
+    else { # positive strand
+      for(my $i = 0; $i < $nsegments; $i++) { 
+        if($i > 0) { $ncbi_coords .= ","; }
+        $ncbi_coords .= $ncbi_coords_A[$i];
+      }
     }
   }
   if($nsegments > 1) { # more than one segment
