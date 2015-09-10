@@ -61,17 +61,20 @@ $usage .= "\n";
 $usage .= "\nusage: dnaorg_parse_ftable.pl <ftable file> <root for naming output files>\n";
 $usage .= "\n";
 $usage .= " OPTIONS:\n";
-$usage .= "  -f <s>: only output table for feature <s>\n";
-$usage .= "  -d <s>: create output files in directory <s>, not the cwd\n";
+$usage .= "  -f <s>  : only output table for feature <s>\n";
+$usage .= "  -d <s>  : create output files in directory <s>, not the cwd\n";
+$usage .= "  -matpept: <ftable file> is not a feature table file but contains mat_peptide info\n";
 $usage .= "\n";
 
 # initialize variables that can be changed with cmdline options
 my $only_feature     = undef; # set to a value if -f used
 my $cap_only_feature = undef; # capitalized version of $only_feature
 my $do_only_feature  = 0;     # set to '1' below if -f used
+my $do_matpept       = 0;     # set to '1' below if -matpept used
 my $out_dir          = undef; # set to a value if -d used
-&GetOptions( "f=s" => \$only_feature, 
-             "d=s" => \$out_dir);
+&GetOptions( "f=s"     => \$only_feature, 
+             "d=s"     => \$out_dir,
+             "matpept" => \$do_matpept);
 
 if(scalar(@ARGV) != 2) { die $usage; }
 my ($ftable_in, $out_root) = (@ARGV);
@@ -79,6 +82,7 @@ my ($ftable_in, $out_root) = (@ARGV);
 open(IN, $ftable_in) || die "ERROR unable to open $ftable_in for reading."; 
 
 if(defined $only_feature) { 
+  if($do_matpept) { die "ERROR -f is incompatible with -matpept"; }
   $cap_only_feature = $only_feature;
   $cap_only_feature =~ tr/a-z/A-Z/;
   $do_only_feature = 1; 
@@ -102,6 +106,7 @@ my $fac_sep         = "::";    # strings separating full accessions, start and s
 my $qval_sep        = ";;";    # strings separating qualifier values  
 my $line_ctr        = 0;       # count of number of lines read in ftable
 my $accn_ctr        = 0;       # count of number of accessions read
+my $dummy_column    = "DuMmY"; # name of 'dummy' column that we don't actually print, for use with -matpept only
 
 # more complicated data structures:
 my %quals_HHA       = ();      # values that will go into a table
@@ -132,194 +137,258 @@ my $prv_was_quals          = 0; # set to '1' if previous line was a qualifier_na
 #########
 # INPUT # 
 #########
-while(my $line = <IN>) { 
-  $line_ctr++;
-  chomp $line;
-  if($line =~ m/\w/) { 
-    # parse each of the 4 line types differently
-    # -------------------------------------------------------
-    if($line =~ /Feature\s+(\S+)$/) { 
-      # ACCESSION LINE
-      # example:
-      #>Feature ref|NC_001359.1|    
-      $faccn = $1;
-      $accn_ctr++;
-      # does line order make sense?
-      if($accn_ctr == 1   ||          # first accession of the file
-         $prv_was_quals ||          # previous line was a quals line (common)
-         $prv_was_coords_feature || # previous line was a coords feature line (rare)
-         $prv_was_coords_only    || # previous line was a coords line without a feature (rare)
-         $prv_was_accn) {           # previous line was an accession line (rare)
-        # line order makes sense, keep going...
-
-        # determine short version of the accession, e.g. NC_001359 in above example
-        if($faccn =~ /[^\|]*\|([^\|]*)\|/) { 
-          $accn = $1;
-          $faccn2accn_H{$faccn} = $accn;
-          push(@faccn_A, $faccn);
-        }
-        else { 
-          die "ERROR unable to parse Feature line $line"; 
-        }
-        $feature     = undef; 
-        $cap_feature = undef;
-        $fac         = undef;
-
-        # update '$prv_*' values that we use to make sure line order makes sense
-        $prv_was_accn           = 1;
-        $prv_was_coords_feature = 0;
-        $prv_was_coords_only    = 0;
-        $prv_was_quals          = 0;
-        #printf("set prv_was_accn\n");
-      }
-      else { # line order is unexpected
-        die "ERROR unexpected line order (accession line) at line $line_ctr: $line\n";
-      }
-    }
-    # -------------------------------------------------------
-    elsif($line =~ /^(\<?\d+\^?)\s+(\>?\d+)\s+(\S+)$/) { 
-      # COORDINATES LINE WITH A FEATURE NAME
-      # example:
-      #230	985	gene
-      ($start, $stop, $feature) = ($1, $2, $3);
-
-      # does line order make sense?
-      if($prv_was_accn  ||           # previous line was accession line (common)
-         $prv_was_quals ||           # previous line was quals line (common)
-         $prv_was_coords_feature ||  # previous line was coords line with a feature (rare)
-         $prv_was_coords_only)    {  # previous line was coords line without a feature (rarer)
-        # line order makes sense, keep going...
-        $cap_feature = $feature;
-        $cap_feature =~ tr/a-z/A-Z/;
-        $fac = $faccn . $fac_sep . $start . $fac_sep . $stop;
-
-        # update '$prv_*' values that we use to make sure line order makes sense
-        $prv_was_accn           = 0;
-        $prv_was_coords_feature = 1;
-        $prv_was_coords_only    = 0;
-        $prv_was_quals          = 0;
-        #printf("set prv_was_coords_feature\n");
-      }
-      else { # line order is unexpected
-        die "ERROR unexpected line order (coords_feature) at line $line_ctr: $line\n";
-      }
-    }
-    # -------------------------------------------------------
-    elsif($line =~ /^(\<?\d+)\s+(\>?\d+)$/) { 
-      # COORDINATES LINE WITHOUT A FEATURE NAME
-      # example:
-      #1	54
-      ($start, $stop) = ($1, $2);
-
-      # does line order make sense?
-      if($prv_was_coords_feature || # previous line was a coords line with a feature (common)
-         $prv_was_coords_only) {    # previous line was a coords line without a feature (common)
-        # line order makes sense, keep going...
-
-        $fac .= $fac_sep . $start . $fac_sep . $stop;
-        
-        # update '$prv_*' values that we use to make sure line order makes sense
-        $prv_was_accn           = 0;
-        $prv_was_coords_feature = 0;
-        $prv_was_coords_only    = 1;
-        $prv_was_quals          = 0;
-        #printf("set prv_was_coords_only\n");
-      }
-      else { # line order is unexpected
-        die "ERROR unexpected line order (coords_only line) at line $line_ctr: $line\n";
-      }
-    }
-    # -------------------------------------------------------
-    elsif(($line =~ /^\s+\S+\s+.+$/) || 
-          ($line =~ /^\s+\S+$/)) { 
-      # QUALIFIER LINE
-      # examples:
-      #			gene	AR1
-      #			locus_tag	PhyvvsAgp1
-
-      # before parsing it, do two sanity checks
-      if(! defined $fac)     { die "ERROR coordinates undefined at a qualifier line"; }
-      if(! defined $feature) { die "ERROR didn't read feature line before line: $line\n"; }
-      # and determine if we even care about this feature
-      if((! $do_only_feature) || ($cap_feature eq $cap_only_feature)) { 
+if(! $do_matpept) { # default mode, we're inputting a feature table file
+  while(my $line = <IN>) { 
+    $line_ctr++;
+    chomp $line;
+    if($line =~ m/\w/) { 
+      # parse each of the 4 line types differently
+      # -------------------------------------------------------
+      if($line =~ /Feature\s+(\S+)$/) { 
+        # ACCESSION LINE
+        # example:
+        #>Feature ref|NC_001359.1|    
+        $faccn = $1;
+        $accn_ctr++;
         # does line order make sense?
-        if($prv_was_coords_feature || 
-           $prv_was_coords_only    ||
-           $prv_was_quals) { 
+        if($accn_ctr == 1   ||          # first accession of the file
+           $prv_was_quals ||          # previous line was a quals line (common)
+           $prv_was_coords_feature || # previous line was a coords feature line (rare)
+           $prv_was_coords_only    || # previous line was a coords line without a feature (rare)
+           $prv_was_accn) {           # previous line was an accession line (rare)
           # line order makes sense, keep going...
 
-
-          if(! $prv_was_quals) { 
-            # first quals line for this feature
-            # at this point, we know that we have the full coordinates for the feature
-            # so initialize the information
-            if(! exists $fac_HHA{$feature}) {
-              %{$fac_HHA{$feature}} = (); 
-            }
-            if(! exists $fac_HHA{$feature}{$faccn}) { 
-              @{$fac_HHA{$feature}{$faccn}} = ();
-            }
-            push(@{$fac_HHA{$feature}{$faccn}}, $fac);
-            # printf("feature: $feature\n");
-            if(! exists $feature_H{$feature}) { 
-              if((! $do_only_feature) || 
-                 ($cap_feature eq $cap_only_feature)) { 
-                $feature_H{$feature} = 1;
-              }
-            }
-            if(! exists $quals_HHA{$feature}) { 
-              %{$quals_HHA{$feature}} = ();
-              @{$quals_HHA{$feature}{$fac}} = ();
-            }
-          } # end of 'if(! $prv_was_quals)'
-
-          # now parse the line;
-          # examples:
-          #			gene	AR1
-          #			locus_tag	PhyvvsAgp1
-          if($line =~ /^\s+(\S+)\s+(.+)$/) { 
-            ($qname, $qval) = ($1, $2);
-          }
-          elsif($line =~ /^\s+(\S+)$/) { 
-            $qname = $1;
-            $qval = "<no_value>";
+          # determine short version of the accession, e.g. NC_001359 in above example
+          if($faccn =~ /[^\|]*\|([^\|]*)\|/) { 
+            $accn = $1;
+            $faccn2accn_H{$faccn} = $accn;
+            push(@faccn_A, $faccn);
           }
           else { 
-            die "ERROR didn't parse quals line on second pass: $line\n"; 
+            die "ERROR unable to parse Feature line $line"; 
           }
-          if($qname =~ m/\Q$qnqv_sep/)   { die "ERROR qualifier_name $qname has the string $qnqv_sep in it"; }
-          if($qval  =~ m/\Q$qnqv_sep/)   { die "ERROR qualifier_value $qval has the string $qnqv_sep in it"; }
-          my $qnqv = $qname . $qnqv_sep . $qval; # this is how we store the qualifier name and value, as a concatenated string in values_HHA
-          push(@{$quals_HHA{$feature}{$fac}}, $qnqv);
+          $feature     = undef; 
+          $cap_feature = undef;
+          $fac         = undef;
 
-          # and update the column data structures which just keep info on names and order of columns
-          if(! exists $column_HH{$feature}) { 
-            %{$column_HH{$feature}} = ();
-            @{$column_HA{$feature}} = (); 
+          # update '$prv_*' values that we use to make sure line order makes sense
+          $prv_was_accn           = 1;
+          $prv_was_coords_feature = 0;
+          $prv_was_coords_only    = 0;
+          $prv_was_quals          = 0;
+          #printf("set prv_was_accn\n");
+        }
+        else { # line order is unexpected
+          die "ERROR unexpected line order (accession line) at line $line_ctr: $line\n";
+        }
+      }
+      # -------------------------------------------------------
+      elsif($line =~ /^(\<?\d+\^?)\s+(\>?\d+)\s+(\S+)$/) { 
+        # COORDINATES LINE WITH A FEATURE NAME
+        # example:
+        #230	985	gene
+        ($start, $stop, $feature) = ($1, $2, $3);
+
+        # does line order make sense?
+        if($prv_was_accn  ||           # previous line was accession line (common)
+           $prv_was_quals ||           # previous line was quals line (common)
+           $prv_was_coords_feature ||  # previous line was coords line with a feature (rare)
+           $prv_was_coords_only)    {  # previous line was coords line without a feature (rarer)
+          # line order makes sense, keep going...
+          $cap_feature = $feature;
+          $cap_feature =~ tr/a-z/A-Z/;
+          $fac = $faccn . $fac_sep . $start . $fac_sep . $stop;
+
+          # update '$prv_*' values that we use to make sure line order makes sense
+          $prv_was_accn           = 0;
+          $prv_was_coords_feature = 1;
+          $prv_was_coords_only    = 0;
+          $prv_was_quals          = 0;
+          #printf("set prv_was_coords_feature\n");
+        }
+        else { # line order is unexpected
+          die "ERROR unexpected line order (coords_feature) at line $line_ctr: $line\n";
+        }
+      }
+      # -------------------------------------------------------
+      elsif($line =~ /^(\<?\d+)\s+(\>?\d+)$/) { 
+        # COORDINATES LINE WITHOUT A FEATURE NAME
+        # example:
+        #1	54
+        ($start, $stop) = ($1, $2);
+
+        # does line order make sense?
+        if($prv_was_coords_feature || # previous line was a coords line with a feature (common)
+           $prv_was_coords_only) {    # previous line was a coords line without a feature (common)
+          # line order makes sense, keep going...
+
+          $fac .= $fac_sep . $start . $fac_sep . $stop;
+          
+          # update '$prv_*' values that we use to make sure line order makes sense
+          $prv_was_accn           = 0;
+          $prv_was_coords_feature = 0;
+          $prv_was_coords_only    = 1;
+          $prv_was_quals          = 0;
+          #printf("set prv_was_coords_only\n");
+        }
+        else { # line order is unexpected
+          die "ERROR unexpected line order (coords_only line) at line $line_ctr: $line\n";
+        }
+      }
+      # -------------------------------------------------------
+      elsif(($line =~ /^\s+\S+\s+.+$/) || 
+            ($line =~ /^\s+\S+$/)) { 
+        # QUALIFIER LINE
+        # examples:
+        #			gene	AR1
+        #			locus_tag	PhyvvsAgp1
+
+        # before parsing it, do two sanity checks
+        if(! defined $fac)     { die "ERROR coordinates undefined at a qualifier line"; }
+        if(! defined $feature) { die "ERROR didn't read feature line before line: $line\n"; }
+        # and determine if we even care about this feature
+        if((! $do_only_feature) || ($cap_feature eq $cap_only_feature)) { 
+          # does line order make sense?
+          if($prv_was_coords_feature || 
+             $prv_was_coords_only    ||
+             $prv_was_quals) { 
+            # line order makes sense, keep going...
+            if(! $prv_was_quals) { 
+              # first quals line for this feature
+              # at this point, we know that we have the full coordinates for the feature
+              # so initialize the information
+              if(! exists $fac_HHA{$feature}) {
+                %{$fac_HHA{$feature}} = (); 
+              }
+              if(! exists $fac_HHA{$feature}{$faccn}) { 
+                @{$fac_HHA{$feature}{$faccn}} = ();
+              }
+              push(@{$fac_HHA{$feature}{$faccn}}, $fac);
+              # printf("feature: $feature\n");
+              if(! exists $feature_H{$feature}) { 
+                if((! $do_only_feature) || 
+                   ($cap_feature eq $cap_only_feature)) { 
+                  $feature_H{$feature} = 1;
+                }
+              }
+              if(! exists $quals_HHA{$feature}) { 
+                %{$quals_HHA{$feature}} = ();
+                @{$quals_HHA{$feature}{$fac}} = ();
+              }
+            } # end of 'if(! $prv_was_quals)'
+
+            # now parse the line;
+            # examples:
+            #			gene	AR1
+            #			locus_tag	PhyvvsAgp1
+            if($line =~ /^\s+(\S+)\s+(.+)$/) { 
+              ($qname, $qval) = ($1, $2);
+            }
+            elsif($line =~ /^\s+(\S+)$/) { 
+              $qname = $1;
+              $qval = "<no_value>";
+            }
+            else { 
+              die "ERROR didn't parse quals line on second pass: $line\n"; 
+            }
+            if($qname =~ m/\Q$qnqv_sep/)   { die "ERROR qualifier_name $qname has the string $qnqv_sep in it"; }
+            if($qval  =~ m/\Q$qnqv_sep/)   { die "ERROR qualifier_value $qval has the string $qnqv_sep in it"; }
+            my $qnqv = $qname . $qnqv_sep . $qval; # this is how we store the qualifier name and value, as a concatenated string in values_HHA
+            push(@{$quals_HHA{$feature}{$fac}}, $qnqv);
+
+            # and update the column data structures which just keep info on names and order of columns
+            if(! exists $column_HH{$feature}) { 
+              %{$column_HH{$feature}} = ();
+              @{$column_HA{$feature}} = (); 
+            }
+            if(! exists $column_HH{$feature}{$qname}) { 
+              push(@{$column_HA{$feature}}, $qname);
+              $column_HH{$feature}{$qname} = 1;
+            }
           }
+          else { # unexpected line order
+            die "ERROR unexpected line order (quals line) at line $line_ctr: $line\n";
+          }          
+        } # end of 'if((! $do_only_feature) || ($cap_feature ne $cap_only_feature))'
+        # update '$prv_*' values that we use to make sure line order makes sense
+        $prv_was_accn           = 0;
+        $prv_was_coords_feature = 0;
+        $prv_was_coords_only    = 0;
+        $prv_was_quals          = 1;
+        #printf("set prv_was_quals\n");
+      }
+      # -------------------------------------------------------
+      else { 
+        die "ERROR unable to parse line $line_ctr: $line\n"; 
+      }
+      # -------------------------------------------------------
+    }
+  }
+} # end of 'if(! $do_matpept)'
+else { # $do_matpept is TRUE, parse the matpept file
+  # example lines of a .mat_peptide file
+  # NC_001475.2	6821	7564	nonstructural protein NS4B	
+  # NC_001475.2	7565	10264	RNA-dependent RNA polymerase NS5
+  # NC_001474.2	97	438	anchored capsid protein C	
+  # NC_001474.2	97	396	capsid protein C	
+  my $feature = "mat_peptide";
+  while(my $line = <IN>) { 
+    if($line =~ m/\w/) { 
+      if($line =~ /(\S+)\s+(\d+)\s+(\d+)\s*(.*)$/) { 
+        if(! exists $feature_H{$feature}) { # $feature is "mat_peptide", defined outside this loop
+          $feature_H{$feature} = 1; 
+        }
+        my ($acc, $start, $stop, $product) = ($1, $2, $3, $4);
+        $product =~ s/\s+$//; # remove trailing whitespace
+        $fac = $acc . $fac_sep . $start . $fac_sep . $stop;
+        if(! exists $faccn2accn_H{$acc}) { 
+          push(@faccn_A, $acc);
+          $faccn2accn_H{$acc} = $acc;
+        }
+
+        if(! exists $fac_HHA{$feature}) {
+          %{$fac_HHA{$feature}} = (); 
+        }
+        push(@{$fac_HHA{$feature}{$acc}}, $fac);
+
+        if(! exists $quals_HHA{$feature}) { 
+          %{$quals_HHA{$feature}} = ();
+          @{$quals_HHA{$feature}{$fac}} = ();
+        }
+        # first add the 'dummy' qual
+        my $qname = $dummy_column;
+        my $qval  = "<no_value>";
+        if($qname =~ m/\Q$qnqv_sep/)   { die "ERROR qualifier_name $qname has the string $qnqv_sep in it"; }
+        if($qval  =~ m/\Q$qnqv_sep/)   { die "ERROR qualifier_value $qval has the string $qnqv_sep in it"; }
+        my $qnqv = $qname . $qnqv_sep . $qval; # this is how we store the qualifier name and value, as a concatenated string in values_HHA
+        push(@{$quals_HHA{$feature}{$fac}}, $qnqv);
+
+        # and update the column data structures which just keep info on names and order of columns
+        if(! exists $column_HH{$feature}) { 
+          %{$column_HH{$feature}} = ();
+          @{$column_HA{$feature}} = (); 
+        }
+        if(! exists $column_HH{$feature}{$qname}) { 
+          push(@{$column_HA{$feature}}, $qname);
+          $column_HH{$feature}{$qname} = 1;
+        }
+
+        if(defined $product && $product ne "") { 
+            # now if the product qualifier has a value add that too
+          $qname = "product";
+          $qval  = $product;
+          $qnqv = $qname . $qnqv_sep . $qval;
+          push(@{$quals_HHA{$feature}{$fac}}, $qnqv);
+            
           if(! exists $column_HH{$feature}{$qname}) { 
             push(@{$column_HA{$feature}}, $qname);
             $column_HH{$feature}{$qname} = 1;
           }
         }
-        else { # unexpected line order
-          die "ERROR unexpected line order (quals line) at line $line_ctr: $line\n";
-        }          
-      } # end of 'if((! $do_only_feature) || ($cap_feature ne $cap_only_feature))'
-      # update '$prv_*' values that we use to make sure line order makes sense
-      $prv_was_accn           = 0;
-      $prv_was_coords_feature = 0;
-      $prv_was_coords_only    = 0;
-      $prv_was_quals          = 1;
-      #printf("set prv_was_quals\n");
-    }
-    # -------------------------------------------------------
-    else { 
-      die "ERROR unable to parse line $line_ctr: $line\n"; 
-    }
-    # -------------------------------------------------------
-  }
-}
+      }
+    } # end of 'if($line =~ m/\w/)
+  } # end of '$line = <IN>' 
+} # end of 'else' entered if $do_matpept is TRUE  
 close(IN);
 
 ##########
@@ -345,7 +414,9 @@ foreach $feature (sort keys %feature_H) {
   # print header line with names of column
   print OUT "#full-accession\taccession\tcoords\tstrand\tmin-coord";
   foreach $column (@{$column_HA{$feature}}) { 
-    print OUT "\t$column"; 
+    if($column ne $dummy_column) { 
+      print OUT "\t$column"; 
+    }
   }
   print OUT "\n";
 
@@ -363,29 +434,31 @@ foreach $feature (sort keys %feature_H) {
 
           # for all columns in the table
           foreach $column (@{$column_HA{$feature}}) {
-            ### printf("\n\n");
-            my $column_str = ""; 
-
-            # for all qualifier names and values 
-            foreach my $qnqv (@{$quals_HHA{$feature}{$fac}}) { 
-              ($qname, $qval) = split($qnqv_sep, $qnqv);
-              ### printf("faccn: $faccn qnqv: $qnqv split into $qname $qval\n");
-
-              # if this qname matches this column, then it's the appropriate value to output here
-              if($qname eq $column) { 
-                if($column_str eq "") { # first value in this cell
-                  $column_str = $qval;  
+            if($column ne $dummy_column) { 
+              ### printf("\n\n");
+              my $column_str = ""; 
+              
+              # for all qualifier names and values 
+              foreach my $qnqv (@{$quals_HHA{$feature}{$fac}}) { 
+                ($qname, $qval) = split($qnqv_sep, $qnqv);
+                ### printf("faccn: $faccn qnqv: $qnqv split into $qname $qval\n");
+                
+                # if this qname matches this column, then it's the appropriate value to output here
+                if($qname eq $column) { 
+                  if($column_str eq "") { # first value in this cell
+                    $column_str = $qval;  
+                  }
+                  else { 
+                    if($qval =~ m/\Q$qval_sep/) { die "ERROR qualifier_name $qval has the string $qval_sep in it"; }
+                    $column_str .= $qval_sep . $qval; # not first value, concatenate onto previous values
+                  }
                 }
-                else { 
-                  if($qval =~ m/\Q$qval_sep/) { die "ERROR qualifier_name $qval has the string $qval_sep in it"; }
-                  $column_str .= $qval_sep . $qval; # not first value, concatenate onto previous values
-                }
+                ### printf("\tcolumn_str: $column_str\n");
               }
-              ### printf("\tcolumn_str: $column_str\n");
+              # if there's no value for this qualifier, put '-'
+              if($column_str eq "") { $column_str = "-"; }
+              print OUT "\t$column_str";
             }
-            # if there's no value for this qualifier, put '-'
-            if($column_str eq "") { $column_str = "-"; }
-            print OUT "\t$column_str";
           }
           print OUT "\n";
           $cur_line_ctr++;
