@@ -327,34 +327,54 @@ if(! $do_matpept) { # default mode, we're inputting a feature table file
 } # end of 'if(! $do_matpept)'
 else { # $do_matpept is TRUE, parse the matpept file
   # example lines of a .mat_peptide file
-  # NC_001475.2	6821	7564	nonstructural protein NS4B	
-  # NC_001475.2	7565	10264	RNA-dependent RNA polymerase NS5
-  # NC_001474.2	97	438	anchored capsid protein C	
-  # NC_001474.2	97	396	capsid protein C	
+  # NC_009942.1	97..465	anchored capsid protein C	
+  # NC_009942.1	97..411	capsid protein C	
+  # NC_009942.1	466..966	membrane glycoprotein precursor M	
+  # NC_009942.1	join(2470..3552,3552..3680)	nonstructural protein NS1'
   my $feature = "mat_peptide";
   while(my $line = <IN>) { 
     if($line =~ m/\w/) { 
-      if($line =~ /(\S+)\s+(\d+)\s+(\d+)\s*(.*)$/) { 
+      if($line =~ /(\S+)\s+(\S+)\s*(.*)$/) { 
         if(! exists $feature_H{$feature}) { # $feature is "mat_peptide", defined outside this loop
           $feature_H{$feature} = 1; 
         }
-        my ($acc, $start, $stop, $product) = ($1, $2, $3, $4);
+        my ($acc, $coords, $product) = ($1, $2, $3);
         $product =~ s/\s+$//; # remove trailing whitespace
-        $fac = $acc . $fac_sep . $start . $fac_sep . $stop;
+        $faccn = $acc;
         if(! exists $faccn2accn_H{$acc}) { 
           push(@faccn_A, $acc);
           $faccn2accn_H{$acc} = $acc;
+        }
+
+        # now we have to break down coords just so we can store each segment separately in fac_HHA, 
+        # because the feature table has each segment separated, and we want to process and OUTPUT
+        # both feature tables and mat_peptide information the same way after we parse it here. At
+        # that point we'll put the coordinates together again. 
+        my @starts_A = ();
+        my @stops_A  = ();
+        my $nsegments = 0;
+        startStopsFromCoords($coords, \@starts_A, \@stops_A, \$nsegments);
+        
+        # printf("coords:    $coords\n");
+        # printf("nsegments: $nsegments\n");
+        for(my $i = 0; $i < $nsegments; $i++) { 
+          my $start = $starts_A[$i];
+          my $stop  = $stops_A[$i];
+          # printf("starts_A[$i]: $starts_A[$i]\n");
+          # printf("stops_A[$i]:  $stops_A[$i]\n");
+          if($i == 0) { 
+            $fac = $faccn . $fac_sep . $start . $fac_sep . $stop;
+          }
+          else { 
+            $fac .= $fac_sep . $start . $fac_sep . $stop;
+          }
         }
 
         if(! exists $fac_HHA{$feature}) {
           %{$fac_HHA{$feature}} = (); 
         }
         push(@{$fac_HHA{$feature}{$acc}}, $fac);
-
-        if(! exists $quals_HHA{$feature}) { 
-          %{$quals_HHA{$feature}} = ();
-          @{$quals_HHA{$feature}{$fac}} = ();
-        }
+        
         # first add the 'dummy' qual
         my $qname = $dummy_column;
         my $qval  = "<no_value>";
@@ -362,7 +382,7 @@ else { # $do_matpept is TRUE, parse the matpept file
         if($qval  =~ m/\Q$qnqv_sep/)   { die "ERROR qualifier_value $qval has the string $qnqv_sep in it"; }
         my $qnqv = $qname . $qnqv_sep . $qval; # this is how we store the qualifier name and value, as a concatenated string in values_HHA
         push(@{$quals_HHA{$feature}{$fac}}, $qnqv);
-
+        
         # and update the column data structures which just keep info on names and order of columns
         if(! exists $column_HH{$feature}) { 
           %{$column_HH{$feature}} = ();
@@ -372,14 +392,14 @@ else { # $do_matpept is TRUE, parse the matpept file
           push(@{$column_HA{$feature}}, $qname);
           $column_HH{$feature}{$qname} = 1;
         }
-
+        
         if(defined $product && $product ne "") { 
-            # now if the product qualifier has a value add that too
+          # now if the product qualifier has a value add that too
           $qname = "product";
           $qval  = $product;
           $qnqv = $qname . $qnqv_sep . $qval;
           push(@{$quals_HHA{$feature}{$fac}}, $qnqv);
-            
+          
           if(! exists $column_HH{$feature}{$qname}) { 
             push(@{$column_HA{$feature}}, $qname);
             $column_HH{$feature}{$qname} = 1;
@@ -630,4 +650,61 @@ sub breakdownFac {
   else                           { die "ERROR in breakdownFac() unable to determine strand for fac: $fac\n"; }
 
   return($faccn, $ncbi_coords, $sort_coord, $ret_strand);
+}
+
+# Subroutine: startStopsFromCoords()
+# Synopsis:   Extract the starts and stops from a coords string.
+#
+# Args:       $coords:  the coords string
+#             $starts_AR: ref to array to fill with start positions
+#             $stops_AR:  ref to array to fill with stop positions
+#             $nexons_R:  ref to scalar that fill with the number of exons
+#
+# Returns:    void; but fills @{$starts_AR}, @{$stops_AR}, and $$nexons_R.
+#
+sub startStopsFromCoords { 
+  my $sub_name = "startStopsFromCoords()";
+  my $nargs_exp = 4;
+  if(scalar(@_) != $nargs_exp) { die "ERROR $sub_name entered with wrong number of input args"; }
+ 
+  my ($coords, $starts_AR, $stops_AR, $nexons_R) = @_;
+
+  @{$starts_AR} = ();
+  @{$stops_AR}  = ();
+  $$nexons_R    = 0;
+  
+  my $orig_coords = $coords;
+  # Examples:
+  # complement(2173412..2176090)
+  # complement(join(226623..226774, 226854..229725))
+
+  # remove 'complement('  ')'
+  $coords =~ s/^complement\(//;
+  $coords =~ s/\)$//;
+
+  # remove 'join('  ')'
+  $coords =~ s/^join\(//;
+  $coords =~ s/\)$//;
+
+  my @el_A = split(/\s*\,\s*/, $coords);
+
+  my $length = 0;
+  foreach my $el (@el_A) { 
+    # rare case: remove 'complement(' ')' that still exists:
+    $el =~ s/^complement\(//;
+    $el =~ s/\)$//;
+    $el =~ s/\<//; # remove '<'
+    $el =~ s/\>//; # remove '>'
+    if($el =~ m/^(\d+)\.\.(\d+)$/) { 
+      push(@{$starts_AR}, $1);
+      push(@{$stops_AR},  $2);
+      $$nexons_R++;
+    }
+    else { 
+      die "ERROR unable to parse $orig_coords in $sub_name"; 
+    }
+  }
+
+  # printf("in startStopsFromCoords(): orig_coords: $orig_coords returning length: $length\n");
+  return;
 }
